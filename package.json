@@ -14,6 +14,9 @@
     "type": "git",
     "url": "https://github.com/sparkscience/wskeyid-browser.git"
   },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "scripts": {
     "start": "tsdx watch",
     "build": "tsdx build",
@@ -34,7 +37,7 @@
     "singleQuote": true,
     "trailingComma": "es5"
   },
-  "name": "wskeyid-browser",
+  "name": "@sparkscience/wskeyid-browser",
   "author": "Sal Rahman",
   "module": "dist/wskeyid-browser.esm.js",
   "size-limit": [
