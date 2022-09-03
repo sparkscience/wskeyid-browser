@@ -1,3 +1,3 @@
-import _WsSession from './ws-session';
+import _AuthenticatedConnection from './authenticated-connection';
 
-export const WsSession = _WsSession;
+export const AuthenticatedConnection = _AuthenticatedConnection;
