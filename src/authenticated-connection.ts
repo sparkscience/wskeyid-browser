@@ -99,6 +99,10 @@ export default class AuthenticatedConnection {
     }
   }
 
+  send(message: string) {
+    this.session.send(message);
+  }
+
   get messageEvents(): Sub<MessageEvent> {
     return this.session.messageEvents;
   }
