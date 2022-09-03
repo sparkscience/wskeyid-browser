@@ -58,7 +58,15 @@ export default class AuthenticatedConnection {
 
     try {
       {
+        const initialConnectionId = this.session.currentConnectionId;
+
         const { data: payload } = await this.session.getNextMessage();
+
+        if (initialConnectionId !== this.session.currentConnectionId) {
+          throw new Error(
+            'A disconnection happened before the next message could have been received'
+          );
+        }
 
         const { type, data } = JSON.parse(payload);
 

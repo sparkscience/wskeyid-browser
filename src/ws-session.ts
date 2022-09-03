@@ -1,103 +1,132 @@
-import PubSub, { getNext, Sub } from "./pub-sub";
+import PubSub, { getNext, Sub } from './pub-sub';
+
+const maxBackoffIncrement = 7;
+const backoffTime = 120;
 
 export default class WsSession {
-	private ws: WebSocket | null = null;
-	private _url: string;
-	private _isClosed: boolean = false;
-	private messages: string[] = [];
-	private _messageEvents: PubSub<MessageEvent> = new PubSub();
-	private _connectedEvents: PubSub<void> = new PubSub();
-	private _disconnectionEvents: PubSub<void> = new PubSub();
-	private _currentConnectionId: number = 0;
+  private ws: WebSocket | null = null;
+  private _url: string;
+  private _isClosed: boolean = false;
+  private messages: string[] = [];
+  private _messageEvents: PubSub<MessageEvent> = new PubSub();
+  private _connectedEvents: PubSub<void> = new PubSub();
+  private _disconnectionEvents: PubSub<void> = new PubSub();
+  private _currentConnectionId: number = 0;
+  private _connectionStatus:
+    | 'PENDING'
+    | 'CONNECTED'
+    | 'DISCONNECTED'
+    | 'FAILED'
+    | 'CONNECTING' = 'PENDING';
 
-	constructor(url: string) {
-		this._url = url;
-		this.connect();
-	}
+  constructor(url: string) {
+    this._url = url;
+    this.connect();
+  }
 
-	private disconnected() {
-		this._currentConnectionId++;
-		this.connect();
-	}
+  private backoffIncrement = 0;
 
-	private connect() {
-		if (this._isClosed) {
-			return;
-		}
+  private resetBackoff() {
+    this.backoffIncrement = 0;
+  }
 
-		const connectionStateSet = new Set([WebSocket.CLOSED, WebSocket.CLOSED]);
+  private disconnected() {
+    this._currentConnectionId++;
+    this.backoffIncrement =
+      this.backoffIncrement < maxBackoffIncrement
+        ? this.backoffIncrement + 1
+        : this.backoffIncrement;
+    this.connect();
+  }
 
-		if (this.ws && connectionStateSet.has(this.ws.readyState)) {
-			this.ws.close();
-		}
+  private connectionStartTime: Date | null = null;
+  private connect() {
+    this._connectionStatus = 'CONNECTING';
 
-		this.ws = new WebSocket(this._url);
+    this.connectionStartTime = new Date();
 
-		this.ws.addEventListener("close", () => {
-			this.disconnected();
-		});
+    setTimeout(() => {
+      this.connectionStartTime = null;
+      if (this._isClosed) {
+        return;
+      }
 
-		this.ws.addEventListener("error", () => {
-			this.disconnected();
-		});
+      const connectionStateSet = new Set([WebSocket.CLOSED, WebSocket.CLOSED]);
 
-		this.ws.addEventListener("open", () => {
-			this._connectedEvents.emit();
-		});
+      if (this.ws && connectionStateSet.has(this.ws.readyState)) {
+        this.ws.close();
+      }
 
-		this.ws.addEventListener("message", (event) => {
-			this._messageEvents.emit(event);
-		});
-	}
+      this.ws = new WebSocket(this._url);
 
-	close() {
-		this._isClosed = true;
-		this.ws?.close();
-	}
+      this.ws.addEventListener('close', () => {
+        this.disconnected();
+      });
 
-	private get socketReady(): boolean {
-		return !!this.ws && this.ws.readyState === WebSocket.OPEN;
-	}
+      this.ws.addEventListener('error', () => {
+        this.disconnected();
+      });
 
-	send(message: string) {
-		if (!this.socketReady) {
-			this.messages.push(message);
-		} else {
-			if (!this.ws) {
-				throw new Error("An unknown error occurred");
-			}
-			this.ws?.send(message);
-		}
-	}
+      this.ws.addEventListener('open', () => {
+        this.resetBackoff();
+        this._connectedEvents.emit();
+      });
 
-	async getNextMessage(): Promise<MessageEvent> {
-		const initialConnectionId = this._currentConnectionId;
-		const message = getNext(this._messageEvents);
-		if (initialConnectionId !== this._currentConnectionId) {
-			throw new Error(
-				"A disconnection happened before the next message could have been received"
-			);
-		}
-		return message;
-	}
+      this.ws.addEventListener('message', event => {
+        this._messageEvents.emit(event);
+      });
+    }, Math.random() * backoffTime * 2 ** this.backoffIncrement);
+  }
 
-	get messageEvents(): Sub<MessageEvent> {
-		return this._messageEvents;
-	}
+  close() {
+    this._isClosed = true;
+    this.ws?.close();
+  }
 
-	get connectionEvents(): Sub<void> {
-		return this._connectedEvents;
-	}
+  private get socketReady(): boolean {
+    return !!this.ws && this.ws.readyState === WebSocket.OPEN;
+  }
 
-	get disconnectionEvents(): Sub<void> {
-		return this._disconnectionEvents;
-	}
+  send(message: string) {
+    if (!this.socketReady) {
+      this.messages.push(message);
+    } else {
+      if (!this.ws) {
+        throw new Error('An unknown error occurred');
+      }
+      this.ws?.send(message);
+    }
+  }
 
-	get isClosed(): boolean {
-		return this._isClosed;
-	}
+  async getNextMessage(): Promise<MessageEvent> {
+    const message = getNext(this._messageEvents);
+    return message;
+  }
 
-	get currentConnectionId(): number {
-		return this._currentConnectionId;
-	}
+  get messageEvents(): Sub<MessageEvent> {
+    return this._messageEvents;
+  }
+
+  get connectionEvents(): Sub<void> {
+    return this._connectedEvents;
+  }
+
+  get disconnectionEvents(): Sub<void> {
+    return this._disconnectionEvents;
+  }
+
+  get isClosed(): boolean {
+    return this._isClosed;
+  }
+
+  get currentConnectionId(): number {
+    return this._currentConnectionId;
+  }
+
+  get connectionStartTimestamp(): number | null {
+    if (!this.connectionStartTime) {
+      return null;
+    }
+    return this.connectionStartTime.getTime();
+  }
 }
