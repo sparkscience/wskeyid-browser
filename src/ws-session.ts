@@ -3,7 +3,7 @@ import PubSub, { getNext, Sub } from './pub-sub';
 const maxBackoffIncrement = 7;
 const backoffTime = 120;
 
-type ConnectionStatus =
+export type ConnectionStatus =
   | 'PENDING'
   | 'CONNECTED'
   | 'DISCONNECTED'
@@ -16,8 +16,9 @@ export default class WsSession {
   private _isClosed: boolean = false;
   private messages: string[] = [];
   private _messageEvents: PubSub<MessageEvent> = new PubSub();
-  private _connectedEvents: PubSub<void> = new PubSub();
-  private _disconnectionEvents: PubSub<void> = new PubSub();
+  private _connectionStatusChangeEvents: PubSub<
+    ConnectionStatus
+  > = new PubSub();
   private _currentConnectionId: number = 0;
   private _connectionStatus: ConnectionStatus = 'PENDING';
 
@@ -41,10 +42,14 @@ export default class WsSession {
     this.connect();
   }
 
+  private setConnectionStatus(connectionStatus: ConnectionStatus) {
+    this._connectionStatus = connectionStatus;
+    this._connectionStatusChangeEvents.emit(connectionStatus);
+  }
+
   private connectionStartTime: Date | null = null;
   private connect() {
-    // TODO: invoke a `setConnectionStatus` method.
-    this._connectionStatus = 'CONNECTING';
+    this.setConnectionStatus('CONNECTING');
 
     this.connectionStartTime = new Date();
 
@@ -63,22 +68,20 @@ export default class WsSession {
       this.ws = new WebSocket(this._url);
 
       this.ws.addEventListener('close', () => {
-        // TODO: invoke a `setConnectionStatus` method.
-        this._connectionStatus = 'DISCONNECTED';
+        this.setConnectionStatus('DISCONNECTED');
         this.disconnected();
       });
 
       this.ws.addEventListener('error', () => {
         // TODO: invoke a `setConnectionStatus` method.
-        this._connectionStatus = 'FAILED';
+        this.setConnectionStatus('FAILED');
         this.disconnected();
       });
 
       this.ws.addEventListener('open', () => {
         // TODO: invoke a `setConnectionStatus` method.
-        this._connectionStatus = 'CONNECTED';
+        this.setConnectionStatus('CONNECTED');
         this.resetBackoff();
-        this._connectedEvents.emit();
       });
 
       this.ws.addEventListener('message', event => {
@@ -116,12 +119,8 @@ export default class WsSession {
     return this._messageEvents;
   }
 
-  get connectionEvents(): Sub<void> {
-    return this._connectedEvents;
-  }
-
-  get disconnectionEvents(): Sub<void> {
-    return this._disconnectionEvents;
+  get connectionStatusChangeEvents(): Sub<ConnectionStatus> {
+    return this._connectionStatusChangeEvents;
   }
 
   get isClosed(): boolean {

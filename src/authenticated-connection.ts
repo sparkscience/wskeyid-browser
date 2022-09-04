@@ -41,8 +41,14 @@ export default class AuthenticatedConnection {
     this._url = url;
 
     this.session = new WsSession(this._url.toString());
-    this.session.connectionEvents.addEventListener(() => {
-      this.connect();
+    this.session.connectionStatusChangeEvents.addEventListener(status => {
+      switch (status) {
+        case 'CONNECTED':
+          {
+            this.connect();
+          }
+          break;
+      }
     });
   }
 
@@ -100,7 +106,6 @@ export default class AuthenticatedConnection {
         }
       }
     } catch (e) {
-      console.error(e);
       this.failed.fail();
       return;
     }
