@@ -3,6 +3,13 @@ import PubSub, { getNext, Sub } from './pub-sub';
 const maxBackoffIncrement = 7;
 const backoffTime = 120;
 
+type ConnectionStatus =
+  | 'PENDING'
+  | 'CONNECTED'
+  | 'DISCONNECTED'
+  | 'FAILED'
+  | 'CONNECTING';
+
 export default class WsSession {
   private ws: WebSocket | null = null;
   private _url: string;
@@ -12,12 +19,7 @@ export default class WsSession {
   private _connectedEvents: PubSub<void> = new PubSub();
   private _disconnectionEvents: PubSub<void> = new PubSub();
   private _currentConnectionId: number = 0;
-  private _connectionStatus:
-    | 'PENDING'
-    | 'CONNECTED'
-    | 'DISCONNECTED'
-    | 'FAILED'
-    | 'CONNECTING' = 'PENDING';
+  private _connectionStatus: ConnectionStatus = 'PENDING';
 
   constructor(url: string) {
     this._url = url;
@@ -41,6 +43,7 @@ export default class WsSession {
 
   private connectionStartTime: Date | null = null;
   private connect() {
+    // TODO: invoke a `setConnectionStatus` method.
     this._connectionStatus = 'CONNECTING';
 
     this.connectionStartTime = new Date();
@@ -60,14 +63,20 @@ export default class WsSession {
       this.ws = new WebSocket(this._url);
 
       this.ws.addEventListener('close', () => {
+        // TODO: invoke a `setConnectionStatus` method.
+        this._connectionStatus = 'DISCONNECTED';
         this.disconnected();
       });
 
       this.ws.addEventListener('error', () => {
+        // TODO: invoke a `setConnectionStatus` method.
+        this._connectionStatus = 'FAILED';
         this.disconnected();
       });
 
       this.ws.addEventListener('open', () => {
+        // TODO: invoke a `setConnectionStatus` method.
+        this._connectionStatus = 'CONNECTED';
         this.resetBackoff();
         this._connectedEvents.emit();
       });
@@ -128,5 +137,9 @@ export default class WsSession {
       return null;
     }
     return this.connectionStartTime.getTime();
+  }
+
+  get connectionStatus(): ConnectionStatus {
+    return this._connectionStatus;
   }
 }
