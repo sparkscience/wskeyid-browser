@@ -22,5 +22,5 @@ export async function generateKeys() {
 export async function getClientId(publicKey: CryptoKey) {
 	const raw = await crypto.subtle.exportKey("raw", publicKey);
 	const encodedRaw = encodeBase64(raw);
-	return `WebCrypto-raw.EC.P-256${encodedRaw}`;
+	return `WebCrypto-raw.EC.P-256$${encodedRaw}`;
 }

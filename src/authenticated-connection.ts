@@ -183,9 +183,10 @@ export default class AuthenticatedConnection {
 		key: CryptoKeyPair
 	): Promise<AuthenticatedConnection> {
 		const clientId = await getClientId(key.publicKey);
+		console.log(clientId);
 		const u = new URL(url);
 		u.searchParams.set("client_id", clientId);
 
-		return new AuthenticatedConnection(new URL(url), key);
+		return new AuthenticatedConnection(new URL(u.toString()), key);
 	}
 }
