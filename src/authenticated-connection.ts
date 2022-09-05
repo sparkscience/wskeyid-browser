@@ -1,55 +1,55 @@
-import { decodeBase64, encodeBase64 } from './base64';
-import Once, { SubOnce } from './once';
-import PubSub, { Sub } from './pub-sub';
-import { getClientId, signMessage } from './utils';
-import WsSession, { ConnectionStatus } from './ws-session';
+import { decodeBase64, encodeBase64 } from "./base64";
+import Once, { SubOnce } from "./once";
+import PubSub, { Sub } from "./pub-sub";
+import { getClientId, signMessage } from "./utils";
+import WsSession, { ConnectionStatus } from "./ws-session";
 
 export type SessionStatus =
-  | ConnectionStatus
-  | 'ERROR'
-  | 'FAILED'
-  | 'AWAITING_CHALLENGE'
-  | 'AWAITING_AUTHORIZATION'
-  | 'AUTHORIZED';
+	| ConnectionStatus
+	| "ERROR"
+	| "FAILED"
+	| "AWAITING_CHALLENGE"
+	| "AWAITING_AUTHORIZATION"
+	| "AUTHORIZED";
 
 export class BadChallengeRequest extends Error {
-  constructor() {
-    super('Got a bad challenge request from the server');
-  }
+	constructor() {
+		super("Got a bad challenge request from the server");
+	}
 }
 
 export class FatalError extends Error {
-  constructor() {
-    super('An attempt was made to connect to a session that does not exist!');
-  }
+	constructor() {
+		super("An attempt was made to connect to a session that does not exist!");
+	}
 }
 
 export class BadAuthorizationResponseError extends Error {
-  constructor() {
-    super('Got a bad authorization error response');
-  }
+	constructor() {
+		super("Got a bad authorization error response");
+	}
 }
 
 class HasFailed<T> implements SubOnce<T> {
-  private _hasFailed: boolean = false;
-  private once: Once<T> = new Once<T>();
+	private _hasFailed: boolean = false;
+	private once: Once<T> = new Once<T>();
 
-  fail(value: T) {
-    this._hasFailed = true;
-    this.once.emit(value);
-  }
+	fail(value: T) {
+		this._hasFailed = true;
+		this.once.emit(value);
+	}
 
-  addEventListener(listener: (value: T) => void): () => void {
-    return this.once.addEventListener(listener);
-  }
+	addEventListener(listener: (value: T) => void): () => void {
+		return this.once.addEventListener(listener);
+	}
 
-  toPromise(): Promise<T> {
-    return this.once.toPromise();
-  }
+	toPromise(): Promise<T> {
+		return this.once.toPromise();
+	}
 
-  get hasFailed() {
-    return this._hasFailed;
-  }
+	get hasFailed() {
+		return this._hasFailed;
+	}
 }
 
 /**
@@ -59,129 +59,133 @@ class HasFailed<T> implements SubOnce<T> {
  * established.
  */
 export default class AuthenticatedConnection {
-  private failed: HasFailed<any> = new HasFailed();
-  private session: WsSession;
-  private _url: URL;
-  private _sessionStatus: SessionStatus;
-  private _sessionStatusChangeEvents: PubSub<SessionStatus> = new PubSub();
+	private failed: HasFailed<any> = new HasFailed();
+	private session: WsSession;
+	private _url: URL;
+	private _sessionStatus: SessionStatus;
+	private _sessionStatusChangeEvents: PubSub<SessionStatus> = new PubSub();
 
-  private constructor(url: URL, private key: CryptoKeyPair) {
-    this._url = url;
+	private constructor(url: URL, private key: CryptoKeyPair) {
+		this._url = url;
 
-    this.session = new WsSession(this._url.toString());
-    this._sessionStatus = this.session.connectionStatus;
-    this.session.connectionStatusChangeEvents.addEventListener(status => {
-      this.setSessionStatus(status);
-      switch (status) {
-        case 'CONNECTED':
-          {
-            this.performHandshake().catch(e => {
-              this.failed.fail(e);
-            });
-          }
-          break;
-      }
-    });
-  }
+		this.session = new WsSession(this._url.toString());
+		this._sessionStatus = this.session.connectionStatus;
+		this.session.connectionStatusChangeEvents.addEventListener((status) => {
+			this.setSessionStatus(status);
+			switch (status) {
+				case "CONNECTED":
+					{
+						this.performHandshake().catch((e) => {
+							this.failed.fail(e);
+						});
+					}
+					break;
+			}
+		});
+	}
 
-  private setSessionStatus(status: SessionStatus) {
-    this._sessionStatus = status;
-    this._sessionStatusChangeEvents.emit(status);
-  }
+	private setSessionStatus(status: SessionStatus) {
+		this._sessionStatus = status;
+		this._sessionStatusChangeEvents.emit(status);
+	}
 
-  private async performHandshake() {
-    if (!this.session) {
-      throw new FatalError();
-    }
-    if (this.session.isClosed) {
-      return;
-    }
+	private async performHandshake() {
+		if (!this.session) {
+			throw new FatalError();
+		}
+		if (this.session.isClosed) {
+			return;
+		}
 
-    {
-      const initialConnectionId = this.session.currentConnectionId;
+		{
+			const initialConnectionId = this.session.currentConnectionId;
 
-      const { data: payload } = await this.session.getNextMessage();
+			const { data: payload } = await this.session.getNextMessage();
 
-      if (initialConnectionId !== this.session.currentConnectionId) {
-        this.performHandshake();
-        return;
-      }
+			if (initialConnectionId !== this.session.currentConnectionId) {
+				this.performHandshake();
+				return;
+			}
 
-      const { type, data } = JSON.parse(payload);
+			const { type, data } = JSON.parse(payload);
 
-      if (type === 'CHALLENGE' && data && typeof data.payload === 'string') {
-        const messageToSign = decodeBase64(data.payload);
-        const signature = await signMessage(this.key.privateKey, messageToSign);
+			if (type === "CHALLENGE" && data && typeof data.payload === "string") {
+				const messageToSign = decodeBase64(data.payload);
+				const signature = await signMessage(this.key.privateKey, messageToSign);
 
-        this.session.send(
-          JSON.stringify({
-            type: 'CHALLENGE_RESPONSE',
-            data: {
-              payload: data.payload,
-              signature: encodeBase64(signature),
-            },
-          })
-        );
-      } else {
-        throw new BadChallengeRequest();
-      }
-    }
+				this.session.send(
+					JSON.stringify({
+						type: "CHALLENGE_RESPONSE",
+						data: {
+							payload: data.payload,
+							signature: encodeBase64(signature),
+						},
+					})
+				);
+			} else {
+				throw new BadChallengeRequest();
+			}
+		}
 
-    {
-      const { data: response } = await this.session.getNextMessage();
+		{
+			const { data: response } = await this.session.getNextMessage();
 
-      const { type } = JSON.parse(response);
+			const { type } = JSON.parse(response);
 
-      if (type !== 'AUTHORIZED') {
-        throw new BadAuthorizationResponseError();
-      }
-    }
-  }
+			if (type !== "AUTHORIZED") {
+				throw new BadAuthorizationResponseError();
+			}
+		}
+	}
 
-  send(message: string) {
-    this.session.send(message);
-  }
+	send(message: string) {
+		this.session.send(message);
+	}
 
-  get messageEvents(): Sub<MessageEvent> {
-    return this.session.messageEvents;
-  }
+	get messageEvents(): Sub<MessageEvent> {
+		return this.session.messageEvents;
+	}
 
-  getNextMessage() {
-    return this.session.getNextMessage();
-  }
+	getNextMessage() {
+		return this.session.getNextMessage();
+	}
 
-  close() {
-    this.session?.close();
-  }
+	close() {
+		this.session?.close();
+	}
 
-  get isClosed() {
-    return this.session.isClosed;
-  }
+	get isClosed() {
+		return this.session.isClosed;
+	}
 
-  get connectionStartTime() {
-    return this.session.connectionStartTimestamp;
-  }
+	get connectionStartTime() {
+		return this.session.connectionStartTimestamp;
+	}
 
-  get hasFailed(): boolean {
-    return this.failed.hasFailed;
-  }
+	get hasFailed(): boolean {
+		return this.failed.hasFailed;
+	}
 
-  get onFail(): SubOnce<void> {
-    return this.failed;
-  }
+	get onFail(): SubOnce<void> {
+		return this.failed;
+	}
 
-  get sessionStatusChangeEvents(): Sub<SessionStatus> {
-    return this._sessionStatusChangeEvents;
-  }
+	get sessionStatus() {
+		return this._sessionStatus;
+	}
 
-  static async connect(
-    url: string,
-    key: CryptoKeyPair
-  ): Promise<AuthenticatedConnection> {
-    const clientId = await getClientId(key.publicKey);
-    const u = new URL(url);
-    u.searchParams.set('client_id', clientId);
+	get sessionStatusChangeEvents(): Sub<SessionStatus> {
+		return this._sessionStatusChangeEvents;
+	}
 
-    return new AuthenticatedConnection(new URL(url), key);
-  }
+	static async connect(
+		url: string,
+		key: CryptoKeyPair
+	): Promise<AuthenticatedConnection> {
+		const clientId = await getClientId(key.publicKey);
+		const u = new URL(url);
+		u.searchParams.set("client_id", clientId);
+
+		return new AuthenticatedConnection(new URL(url), key);
+	}
 }
