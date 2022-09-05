@@ -51,7 +51,8 @@ export default class WsSession {
   private connect() {
     this.setConnectionStatus('CONNECTING');
 
-    this.connectionStartTime = new Date();
+    const timeout = Math.random() * backoffTime * 2 ** this.backoffIncrement;
+    this.connectionStartTime = new Date(Date.now() + timeout);
 
     setTimeout(() => {
       this.connectionStartTime = null;
@@ -73,13 +74,11 @@ export default class WsSession {
       });
 
       this.ws.addEventListener('error', () => {
-        // TODO: invoke a `setConnectionStatus` method.
         this.setConnectionStatus('FAILED');
         this.disconnected();
       });
 
       this.ws.addEventListener('open', () => {
-        // TODO: invoke a `setConnectionStatus` method.
         this.setConnectionStatus('CONNECTED');
         this.resetBackoff();
       });
@@ -87,7 +86,7 @@ export default class WsSession {
       this.ws.addEventListener('message', event => {
         this._messageEvents.emit(event);
       });
-    }, Math.random() * backoffTime * 2 ** this.backoffIncrement);
+    }, timeout);
   }
 
   close() {

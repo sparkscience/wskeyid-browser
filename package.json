@@ -31,12 +31,6 @@
       "pre-commit": "tsdx lint"
     }
   },
-  "prettier": {
-    "printWidth": 80,
-    "semi": true,
-    "singleQuote": true,
-    "trailingComma": "es5"
-  },
   "name": "@sparkscience/wskeyid-browser",
   "author": "Sal Rahman",
   "module": "dist/wskeyid-browser.esm.js",
