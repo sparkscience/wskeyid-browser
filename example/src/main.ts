@@ -11,7 +11,7 @@ Promise.resolve()
 		);
 
 		session.sessionStatusChangeEvents.addEventListener((status) => {
-			console.log(status);
+			console.log(` ${status}`);
 		});
 
 		for await (const event of toAsyncIterable(session.messageEvents)) {
