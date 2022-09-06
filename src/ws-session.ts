@@ -47,15 +47,15 @@ export default class WsSession {
 		this._connectionStatusChangeEvents.emit(connectionStatus);
 	}
 
-	private connectionStartTime: Date | null = null;
+	private expectedConnectionStartTime: Date | null = null;
 	private connect() {
 		this.setConnectionStatus("CONNECTING");
 
 		const timeout = Math.random() * backoffTime * 2 ** this.backoffIncrement;
-		this.connectionStartTime = new Date(Date.now() + timeout);
+		this.expectedConnectionStartTime = new Date(Date.now() + timeout);
 
 		setTimeout(() => {
-			this.connectionStartTime = null;
+			this.expectedConnectionStartTime = null;
 			if (this._isClosed) {
 				return;
 			}
@@ -130,11 +130,11 @@ export default class WsSession {
 		return this._currentConnectionId;
 	}
 
-	get connectionStartTimestamp(): number | null {
-		if (!this.connectionStartTime) {
+	get expectedConnectionStartTimestamp(): number | null {
+		if (!this.expectedConnectionStartTime) {
 			return null;
 		}
-		return this.connectionStartTime.getTime();
+		return this.expectedConnectionStartTime.getTime();
 	}
 
 	get connectionStatus(): ConnectionStatus {

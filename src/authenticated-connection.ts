@@ -158,8 +158,8 @@ export default class AuthenticatedConnection {
 		return this.session.isClosed;
 	}
 
-	get connectionStartTime() {
-		return this.session.connectionStartTimestamp;
+	get expectedConnectionStartTimestamp() {
+		return this.session.expectedConnectionStartTimestamp;
 	}
 
 	get hasFailed(): boolean {
