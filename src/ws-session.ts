@@ -8,7 +8,8 @@ export type ConnectionStatus =
 	| "CONNECTED"
 	| "DISCONNECTED"
 	| "FAILED"
-	| "CONNECTING";
+	| "CONNECTING"
+	| "CLOSED";
 
 export default class WsSession {
 	private ws: WebSocket | null = null;
@@ -49,6 +50,11 @@ export default class WsSession {
 
 	private expectedConnectionStartTime: Date | null = null;
 	private connect() {
+		if (this._isClosed) {
+			this.setConnectionStatus("CLOSED");
+			return;
+		}
+
 		this.setConnectionStatus("CONNECTING");
 
 		const timeout = Math.random() * backoffTime * 2 ** this.backoffIncrement;
@@ -57,6 +63,7 @@ export default class WsSession {
 		setTimeout(() => {
 			this.expectedConnectionStartTime = null;
 			if (this._isClosed) {
+				this.setConnectionStatus("CLOSED");
 				return;
 			}
 

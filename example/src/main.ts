@@ -16,7 +16,7 @@ Promise.resolve()
 			console.log(`Status ${status}`);
 
 			if (status === "CONNECTING") {
-				setInterval(() => {
+				interval = setInterval(() => {
 					if (session.expectedConnectionStartTimestamp) {
 						const timeDifference =
 							session.expectedConnectionStartTimestamp - Date.now();

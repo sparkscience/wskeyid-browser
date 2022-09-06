@@ -85,6 +85,7 @@ export default class AuthenticatedConnection {
 					{
 						this.performHandshake().catch((e) => {
 							this.failed.fail(e);
+							this.session.close();
 						});
 					}
 					break;
