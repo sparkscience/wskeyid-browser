@@ -25,8 +25,16 @@ export class FatalError extends Error {
 }
 
 export class BadAuthorizationResponseError extends Error {
-	constructor() {
+	private _messageBody: any;
+
+	constructor(messageBody: any) {
 		super("Got a bad authorization error response");
+
+		this._messageBody = messageBody;
+	}
+
+	get messageBody() {
+		return this._messageBody;
 	}
 }
 
@@ -130,10 +138,11 @@ export default class AuthenticatedConnection {
 		{
 			const { data: response } = await this.session.getNextMessage();
 
-			const { type } = JSON.parse(response);
+			const messageBody = JSON.parse(response);
+			const { type } = messageBody;
 
 			if (type !== "AUTHORIZED") {
-				throw new BadAuthorizationResponseError();
+				throw new BadAuthorizationResponseError(messageBody);
 			}
 		}
 	}
