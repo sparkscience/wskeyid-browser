@@ -6,8 +6,6 @@ import WsSession, { ConnectionStatus } from "./ws-session";
 
 export type SessionStatus =
 	| ConnectionStatus
-	| "ERROR"
-	| "FAILED"
 	| "AWAITING_CHALLENGE"
 	| "AWAITING_AUTHORIZATION"
 	| "AUTHORIZED";
@@ -72,6 +70,7 @@ export default class AuthenticatedConnection {
 	private _url: URL;
 	private _sessionStatus: SessionStatus;
 	private _sessionStatusChangeEvents: PubSub<SessionStatus> = new PubSub();
+	private _messageEvents: PubSub<MessageEvent> = new PubSub();
 
 	private constructor(url: URL, private key: CryptoKeyPair) {
 		this._url = url;
@@ -89,6 +88,11 @@ export default class AuthenticatedConnection {
 						});
 					}
 					break;
+			}
+		});
+		this.session.messageEvents.addEventListener((message) => {
+			if (this.sessionStatus === "AUTHORIZED") {
+				this._messageEvents.emit(message);
 			}
 		});
 	}
@@ -109,6 +113,7 @@ export default class AuthenticatedConnection {
 		{
 			const initialConnectionId = this.session.currentConnectionId;
 
+			this.setSessionStatus("AWAITING_CHALLENGE");
 			const { data: payload } = await this.session.getNextMessage();
 
 			if (initialConnectionId !== this.session.currentConnectionId) {
@@ -131,6 +136,8 @@ export default class AuthenticatedConnection {
 						},
 					})
 				);
+
+				this.setSessionStatus("AWAITING_AUTHORIZATION");
 			} else {
 				throw new BadChallengeRequest();
 			}
@@ -145,6 +152,8 @@ export default class AuthenticatedConnection {
 			if (type !== "AUTHORIZED") {
 				throw new BadAuthorizationResponseError(messageBody);
 			}
+
+			this.setSessionStatus("AUTHORIZED");
 		}
 	}
 
@@ -153,7 +162,7 @@ export default class AuthenticatedConnection {
 	}
 
 	get messageEvents(): Sub<MessageEvent> {
-		return this.session.messageEvents;
+		return this._messageEvents;
 	}
 
 	getNextMessage() {
