@@ -1,5 +1,6 @@
 import { decodeBase64, encodeBase64 } from "./base64";
-import Once, { SubOnce } from "./once";
+import HasFailed from "./has-failed";
+import { SubOnce } from "./once";
 import PubSub, { getNext, Sub } from "./pub-sub";
 import { getClientId, signMessage } from "./utils";
 
@@ -15,18 +16,14 @@ export type SessionStatus =
 	| { type: "CONNECTED" }
 	| {
 			type: "CLOSED";
-			reason: { type: "FAILED"; data: any } | { type: "CLIENT_CLOSED" };
+			reason:
+				| { type: "CONNECTION_ERROR"; data: any }
+				| { type: "CLIENT_CLOSED" };
 	  };
 
 export class BadChallengeRequest extends Error {
 	constructor() {
 		super("Got a bad challenge request from the server");
-	}
-}
-
-export class FatalError extends Error {
-	constructor() {
-		super("An attempt was made to connect to a session that does not exist!");
 	}
 }
 
@@ -41,28 +38,6 @@ export class BadAuthorizationResponseError extends Error {
 
 	get messageBody() {
 		return this._messageBody;
-	}
-}
-
-class HasFailed<T> implements SubOnce<T> {
-	private _hasFailed: boolean = false;
-	private once: Once<T> = new Once<T>();
-
-	fail(value: T) {
-		this._hasFailed = true;
-		this.once.emit(value);
-	}
-
-	addEventListener(listener: (value: T) => void): () => void {
-		return this.once.addEventListener(listener);
-	}
-
-	toPromise(): Promise<T> {
-		return this.once.toPromise();
-	}
-
-	get hasFailed() {
-		return this._hasFailed;
 	}
 }
 
@@ -99,14 +74,10 @@ export default class AuthenticatedConnection {
 		this.ws.addEventListener("error", (event) => {
 			this.setSessionStatus({
 				type: "CLOSED",
-				reason: { type: "FAILED", data: event },
+				reason: { type: "CONNECTION_ERROR", data: event },
 			});
 		});
 		this.ws.addEventListener("open", () => {
-			this.setSessionStatus({
-				type: "CONNECTING",
-				status: "AWAITING_CHALLENGE",
-			});
 			this.performHandshake().catch((e) => {
 				this.failed.fail(e);
 				this.ws.close();
@@ -133,7 +104,7 @@ export default class AuthenticatedConnection {
 				type: "CONNECTING",
 				status: "AWAITING_CHALLENGE",
 			});
-			const { data: payload } = await getNext(this.messageEvents);
+			const { data: payload } = await getNext(this._internalMessageEvents);
 
 			const { type, data } = JSON.parse(payload);
 
@@ -161,7 +132,7 @@ export default class AuthenticatedConnection {
 		}
 
 		{
-			const { data: response } = await getNext(this.messageEvents);
+			const { data: response } = await getNext(this._internalMessageEvents);
 
 			const messageBody = JSON.parse(response);
 			const { type } = messageBody;
@@ -179,7 +150,7 @@ export default class AuthenticatedConnection {
 	}
 
 	get messageEvents(): Sub<MessageEvent> {
-		return this.messageEvents;
+		return this._messageEvents;
 	}
 
 	getNextMessage(): Promise<MessageEvent> {
