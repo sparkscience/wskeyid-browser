@@ -1,14 +1,22 @@
 import { decodeBase64, encodeBase64 } from "./base64";
 import Once, { SubOnce } from "./once";
-import PubSub, { Sub } from "./pub-sub";
+import PubSub, { getNext, Sub } from "./pub-sub";
 import { getClientId, signMessage } from "./utils";
-import WsSession, { ConnectionStatus } from "./ws-session";
 
 export type SessionStatus =
-	| ConnectionStatus
-	| "AWAITING_CHALLENGE"
-	| "AWAITING_AUTHORIZATION"
-	| "AUTHORIZED";
+	| { type: "PENDING" }
+	| {
+			type: "CONNECTING";
+			status:
+				| "WAITING_WEBSOCKET_CONNECTION"
+				| "AWAITING_CHALLENGE"
+				| "AWAITING_AUTHORIZATION";
+	  }
+	| { type: "CONNECTED" }
+	| {
+			type: "CLOSED";
+			reason: { type: "FAILED"; data: any } | { type: "CLIENT_CLOSED" };
+	  };
 
 export class BadChallengeRequest extends Error {
 	constructor() {
@@ -66,60 +74,66 @@ class HasFailed<T> implements SubOnce<T> {
  */
 export default class AuthenticatedConnection {
 	private failed: HasFailed<any> = new HasFailed();
-	private session: WsSession;
+	private ws: WebSocket;
 	private _url: URL;
-	private _sessionStatus: SessionStatus;
+	private _sessionStatus: SessionStatus = { type: "PENDING" };
 	private _sessionStatusChangeEvents: PubSub<SessionStatus> = new PubSub();
+	private _internalMessageEvents: PubSub<MessageEvent> = new PubSub();
 	private _messageEvents: PubSub<MessageEvent> = new PubSub();
 
 	private constructor(url: URL, private key: CryptoKeyPair) {
 		this._url = url;
 
-		this.session = new WsSession(this._url.toString());
-		this._sessionStatus = this.session.connectionStatus;
-		this.session.connectionStatusChangeEvents.addEventListener((status) => {
-			this.setSessionStatus(status);
-			switch (status) {
-				case "CONNECTED":
-					{
-						this.performHandshake().catch((e) => {
-							this.failed.fail(e);
-							this.session.close();
-						});
-					}
-					break;
-			}
+		this.setSessionStatus({
+			type: "CONNECTING",
+			status: "WAITING_WEBSOCKET_CONNECTION",
 		});
-		this.session.messageEvents.addEventListener((message) => {
-			if (this.sessionStatus === "AUTHORIZED") {
-				this._messageEvents.emit(message);
+
+		this.ws = new WebSocket(this._url.toString());
+		this.ws.addEventListener("close", () => {
+			this.setSessionStatus({
+				type: "CLOSED",
+				reason: { type: "CLIENT_CLOSED" },
+			});
+		});
+		this.ws.addEventListener("error", (event) => {
+			this.setSessionStatus({
+				type: "CLOSED",
+				reason: { type: "FAILED", data: event },
+			});
+		});
+		this.ws.addEventListener("open", () => {
+			this.setSessionStatus({
+				type: "CONNECTING",
+				status: "AWAITING_CHALLENGE",
+			});
+			this.performHandshake().catch((e) => {
+				this.failed.fail(e);
+				this.ws.close();
+			});
+		});
+		this.ws.addEventListener("message", (event) => {
+			this._internalMessageEvents.emit(event);
+			if (this.sessionStatus.type === "CONNECTED") {
+				this._messageEvents.emit(event);
 			}
 		});
 	}
 
 	private setSessionStatus(status: SessionStatus) {
 		this._sessionStatus = status;
-		this._sessionStatusChangeEvents.emit(status);
+		setTimeout(() => {
+			this._sessionStatusChangeEvents.emit(status);
+		});
 	}
 
 	private async performHandshake() {
-		if (!this.session) {
-			throw new FatalError();
-		}
-		if (this.session.isClosed) {
-			return;
-		}
-
 		{
-			const initialConnectionId = this.session.currentConnectionId;
-
-			this.setSessionStatus("AWAITING_CHALLENGE");
-			const { data: payload } = await this.session.getNextMessage();
-
-			if (initialConnectionId !== this.session.currentConnectionId) {
-				this.performHandshake();
-				return;
-			}
+			this.setSessionStatus({
+				type: "CONNECTING",
+				status: "AWAITING_CHALLENGE",
+			});
+			const { data: payload } = await getNext(this.messageEvents);
 
 			const { type, data } = JSON.parse(payload);
 
@@ -127,7 +141,7 @@ export default class AuthenticatedConnection {
 				const messageToSign = decodeBase64(data.payload);
 				const signature = await signMessage(this.key.privateKey, messageToSign);
 
-				this.session.send(
+				this.ws.send(
 					JSON.stringify({
 						type: "CHALLENGE_RESPONSE",
 						data: {
@@ -137,14 +151,17 @@ export default class AuthenticatedConnection {
 					})
 				);
 
-				this.setSessionStatus("AWAITING_AUTHORIZATION");
+				this.setSessionStatus({
+					type: "CONNECTING",
+					status: "AWAITING_AUTHORIZATION",
+				});
 			} else {
 				throw new BadChallengeRequest();
 			}
 		}
 
 		{
-			const { data: response } = await this.session.getNextMessage();
+			const { data: response } = await getNext(this.messageEvents);
 
 			const messageBody = JSON.parse(response);
 			const { type } = messageBody;
@@ -153,32 +170,28 @@ export default class AuthenticatedConnection {
 				throw new BadAuthorizationResponseError(messageBody);
 			}
 
-			this.setSessionStatus("AUTHORIZED");
+			this.setSessionStatus({ type: "CONNECTED" });
 		}
 	}
 
 	send(message: string) {
-		this.session.send(message);
+		this.ws.send(message);
 	}
 
 	get messageEvents(): Sub<MessageEvent> {
-		return this._messageEvents;
+		return this.messageEvents;
 	}
 
-	getNextMessage() {
-		return this.session.getNextMessage();
+	getNextMessage(): Promise<MessageEvent> {
+		return getNext(this.messageEvents);
 	}
 
 	close() {
-		this.session?.close();
+		this.ws?.close();
 	}
 
 	get isClosed() {
-		return this.session.isClosed;
-	}
-
-	get expectedConnectionStartTimestamp() {
-		return this.session.expectedConnectionStartTimestamp;
+		return this._sessionStatus.type === "CLOSED";
 	}
 
 	get hasFailed(): boolean {
