@@ -1,24 +1,43 @@
 import AuthenticatedConnection from "../../src/authenticated-connection";
-import HasFailed from "../../src/has-failed";
-import Once, { SubOnce } from "../../src/once";
-import { toAsyncIterable } from "../../src/pub-sub";
+import Trigger from "../../src/trigger";
+import PubSub, { getNext, Sub, toAsyncIterable } from "../../src/pub-sub";
 import { generateKeys } from "../../src/utils";
 
 class Session {
-	private connection: AuthenticatedConnection;
+	private connection: AuthenticatedConnection | null = null;
+	private readonly failed: Trigger<any> = new Trigger();
+	private readonly _messageEvents: PubSub<MessageEvent> = new PubSub();
 
-	constructor(url: string, key: CryptoKeyPair) {
-		this.connect().then(() => {
-			
-		}).catch((e) => {
-			console.error(e);
+	private fail(error: any) {
+		this.failed.trigger(error)
+	}
+
+	constructor(private readonly url: string, private readonly key: CryptoKeyPair) {
+		this.connect().catch((e) => {
+			this.fail(e);
 		});
 	}
 
-	async connect() {}
+	private async connect() {
+		this.connection = await AuthenticatedConnection.connect(this.url, this.key);
+		this.connection.onFail.addEventListener((e) => {
+			this.fail(e);
+		});
+		this.connection.messageEvents.addEventListener(listener => {
+			
+		});
+	}
 
-	onFail(): SubOnce<void> {
-		this.
+	getNextMessage() {
+		return getNext(this._messageEvents);
+	}
+
+	get messageEvents(): Sub<MessageEvent> {
+		return this._messageEvents;
+	}
+
+	get hasFailed() {
+		return this.failed.hasTriggered
 	}
 }
 

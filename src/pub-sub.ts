@@ -5,7 +5,7 @@ export interface Sub<T> {
 }
 
 export default class PubSub<T> implements Sub<T> {
-	private listeners: Set<Listener<T>> = new Set();
+	private readonly listeners: Set<Listener<T>> = new Set();
 
 	emit(event: T) {
 		for (const listener of this.listeners) {

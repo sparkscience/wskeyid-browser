@@ -1,5 +1,5 @@
 import { decodeBase64, encodeBase64 } from "./base64";
-import HasFailed from "./has-failed";
+import Trigger from "./trigger";
 import { SubOnce } from "./once";
 import PubSub, { getNext, Sub } from "./pub-sub";
 import { getClientId, signMessage } from "./utils";
@@ -48,13 +48,24 @@ export class BadAuthorizationResponseError extends Error {
  * established.
  */
 export default class AuthenticatedConnection {
-	private failed: HasFailed<any> = new HasFailed();
+	private readonly failed: Trigger<any> = new Trigger();
 	private ws: WebSocket;
-	private _url: URL;
+	private readonly _url: URL;
 	private _sessionStatus: SessionStatus = { type: "PENDING" };
-	private _sessionStatusChangeEvents: PubSub<SessionStatus> = new PubSub();
-	private _internalMessageEvents: PubSub<MessageEvent> = new PubSub();
-	private _messageEvents: PubSub<MessageEvent> = new PubSub();
+	private readonly _sessionStatusChangeEvents: PubSub<SessionStatus> = new PubSub();
+	private readonly _internalMessageEvents: PubSub<MessageEvent> = new PubSub();
+	private readonly _messageEvents: PubSub<MessageEvent> = new PubSub();
+
+	private fail(error: any) {
+		this.setSessionStatus({
+			type: 'CLOSED',
+			reason: { type: "CONNECTION_ERROR", data: error }
+		});
+		this.failed.trigger(error);
+		try {
+			this.ws.close();
+		} finally {}
+	}
 
 	private constructor(url: URL, private key: CryptoKeyPair) {
 		this._url = url;
@@ -72,15 +83,11 @@ export default class AuthenticatedConnection {
 			});
 		});
 		this.ws.addEventListener("error", (event) => {
-			this.setSessionStatus({
-				type: "CLOSED",
-				reason: { type: "CONNECTION_ERROR", data: event },
-			});
+			this.fail(event);
 		});
 		this.ws.addEventListener("open", () => {
 			this.performHandshake().catch((e) => {
-				this.failed.fail(e);
-				this.ws.close();
+				this.fail(e);
 			});
 		});
 		this.ws.addEventListener("message", (event) => {
@@ -166,7 +173,7 @@ export default class AuthenticatedConnection {
 	}
 
 	get hasFailed(): boolean {
-		return this.failed.hasFailed;
+		return this.failed.hasTriggered;
 	}
 
 	get onFail(): SubOnce<void> {
@@ -186,7 +193,6 @@ export default class AuthenticatedConnection {
 		key: CryptoKeyPair
 	): Promise<AuthenticatedConnection> {
 		const clientId = await getClientId(key.publicKey);
-		console.log(clientId);
 		const u = new URL(url);
 		u.searchParams.set("client_id", clientId);
 
