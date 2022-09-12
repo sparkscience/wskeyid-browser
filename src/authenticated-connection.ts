@@ -1,10 +1,8 @@
 import { decodeBase64, encodeBase64 } from "./base64";
-import Trigger from "./trigger";
-import { SubOnce } from "./once";
 import PubSub, { getNext, Sub } from "./pub-sub";
 import { getClientId, signMessage } from "./utils";
 
-export type SessionStatus =
+export type ConnectionStatus =
 	| { type: "PENDING" }
 	| {
 			type: "CONNECTING";
@@ -48,23 +46,24 @@ export class BadAuthorizationResponseError extends Error {
  * established.
  */
 export default class AuthenticatedConnection {
-	private readonly failed: Trigger<any> = new Trigger();
 	private ws: WebSocket;
 	private readonly _url: URL;
-	private _sessionStatus: SessionStatus = { type: "PENDING" };
-	private readonly _sessionStatusChangeEvents: PubSub<SessionStatus> = new PubSub();
+	private _sessionStatus: Readonly<ConnectionStatus> = { type: "PENDING" };
+	private readonly _sessionStatusChangeEvents: PubSub<
+		Readonly<ConnectionStatus>
+	> = new PubSub();
 	private readonly _internalMessageEvents: PubSub<MessageEvent> = new PubSub();
 	private readonly _messageEvents: PubSub<MessageEvent> = new PubSub();
 
 	private fail(error: any) {
 		this.setSessionStatus({
-			type: 'CLOSED',
-			reason: { type: "CONNECTION_ERROR", data: error }
+			type: "CLOSED",
+			reason: { type: "CONNECTION_ERROR", data: error },
 		});
-		this.failed.trigger(error);
 		try {
 			this.ws.close();
-		} finally {}
+		} finally {
+		}
 	}
 
 	private constructor(url: URL, private key: CryptoKeyPair) {
@@ -98,7 +97,7 @@ export default class AuthenticatedConnection {
 		});
 	}
 
-	private setSessionStatus(status: SessionStatus) {
+	private setSessionStatus(status: ConnectionStatus) {
 		this._sessionStatus = status;
 		setTimeout(() => {
 			this._sessionStatusChangeEvents.emit(status);
@@ -172,19 +171,11 @@ export default class AuthenticatedConnection {
 		return this._sessionStatus.type === "CLOSED";
 	}
 
-	get hasFailed(): boolean {
-		return this.failed.hasTriggered;
-	}
-
-	get onFail(): SubOnce<void> {
-		return this.failed;
-	}
-
 	get sessionStatus() {
 		return this._sessionStatus;
 	}
 
-	get sessionStatusChangeEvents(): Sub<SessionStatus> {
+	get sessionStatusChangeEvents(): Sub<ConnectionStatus> {
 		return this._sessionStatusChangeEvents;
 	}
 
