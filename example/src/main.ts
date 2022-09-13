@@ -4,11 +4,16 @@ import AuthenticatedConnection, {
 import PubSub, { getNext, Sub, toAsyncIterable } from "../../src/pub-sub";
 import { generateKeys } from "../../src/utils";
 
+const backoffMSIncrement = 120;
+const maxBackoffExponent = 9;
+
 class Session {
 	private connection: AuthenticatedConnection | null = null;
 	private readonly _messageEvents: PubSub<MessageEvent> = new PubSub();
 	private connectionStatus: Readonly<ConnectionStatus> = { type: "PENDING" };
-	private connectionStatusChangeEvents: PubSub<ConnectionStatus> = new PubSub();
+	private sessionStatusChangeEvents: PubSub<ConnectionStatus> = new PubSub();
+
+	private backoffExponent = 0;
 
 	private async fail(error: any) {
 		const errorStatus: Readonly<ConnectionStatus> = Object.freeze<
@@ -19,11 +24,20 @@ class Session {
 		});
 		this.connectionStatus = errorStatus;
 
-		try {
-			await this.connect();
-		} catch (e) {
-			this.fail(e);
-		}
+		const backoffExponent = this.backoffExponent;
+
+		this.backoffExponent =
+			this.backoffExponent >= maxBackoffExponent
+				? maxBackoffExponent
+				: this.backoffExponent + 1;
+
+		return new Promise((resolve) => {
+			setTimeout(() => {
+				this.connect()
+					.catch(this.fail.bind(this))
+					.then(resolve);
+			}, backoffMSIncrement * 2 ** backoffExponent);
+		});
 	}
 
 	constructor(
@@ -38,8 +52,16 @@ class Session {
 	private async connect() {
 		this.connection = await AuthenticatedConnection.connect(this.url, this.key);
 		this.connection.sessionStatusChangeEvents.addEventListener((status) => {
+			if (status.type === "CONNECTED") {
+				this.backoffExponent = 0;
+			}
 			this.connectionStatus = status;
-			this.connectionStatusChangeEvents.emit(status);
+			this.sessionStatusChangeEvents.emit(status);
+			if (status.type === "CLOSED") {
+				this.connect().catch((e) => {
+					this.fail(e).catch(this.fail.bind(this));
+				});
+			}
 		});
 		this.connection.messageEvents.addEventListener((message) => {
 			this._messageEvents.emit(message);
