@@ -7,10 +7,12 @@ import { generateKeys } from "../../src/utils";
 const backoffMSIncrement = 120;
 const maxBackoffExponent = 9;
 
+type SessionStatus = ConnectionStatus;
+
 class Session {
 	private connection: AuthenticatedConnection | null = null;
 	private readonly _messageEvents: PubSub<MessageEvent> = new PubSub();
-	private connectionStatus: Readonly<ConnectionStatus> = { type: "PENDING" };
+	private _sessionStatus: Readonly<SessionStatus> = { type: "PENDING" };
 	private sessionStatusChangeEvents: PubSub<ConnectionStatus> = new PubSub();
 
 	private backoffExponent = 0;
@@ -22,7 +24,8 @@ class Session {
 			type: "CLOSED",
 			reason: { type: "CONNECTION_ERROR", data: error },
 		});
-		this.connectionStatus = errorStatus;
+
+		this.setSessionStatus(errorStatus);
 
 		const backoffExponent = this.backoffExponent;
 
@@ -49,14 +52,20 @@ class Session {
 		});
 	}
 
+	private setSessionStatus(status: ConnectionStatus) {
+		this._sessionStatus = status;
+		setTimeout(() => {
+			this.sessionStatusChangeEvents.emit(status);
+		});
+	}
+
 	private async connect() {
 		this.connection = await AuthenticatedConnection.connect(this.url, this.key);
 		this.connection.sessionStatusChangeEvents.addEventListener((status) => {
 			if (status.type === "CONNECTED") {
 				this.backoffExponent = 0;
 			}
-			this.connectionStatus = status;
-			this.sessionStatusChangeEvents.emit(status);
+			this.setSessionStatus(status);
 			if (status.type === "CLOSED") {
 				this.connect().catch((e) => {
 					this.fail(e).catch(this.fail.bind(this));
@@ -77,7 +86,7 @@ class Session {
 	}
 
 	get sessionStatus(): ConnectionStatus {
-		return this.connectionStatus;
+		return this._sessionStatus;
 	}
 }
 
