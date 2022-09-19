@@ -7,26 +7,23 @@ import { generateKeys } from "../../src/utils";
 const backoffMSIncrement = 120;
 const maxBackoffExponent = 9;
 
-type SessionStatus = ConnectionStatus;
+type SessionStatus =
+	| ConnectionStatus
+	| {
+			type: "SLEEPING";
+			sleepUntil: number;
+			restartReason: { type: "CLOSED" } | { type: "ERROR"; data: any };
+	  };
 
 class Session {
 	private connection: AuthenticatedConnection | null = null;
 	private readonly _messageEvents: PubSub<MessageEvent> = new PubSub();
 	private _sessionStatus: Readonly<SessionStatus> = { type: "PENDING" };
-	private sessionStatusChangeEvents: PubSub<ConnectionStatus> = new PubSub();
+	private sessionStatusChangeEvents: PubSub<SessionStatus> = new PubSub();
 
 	private backoffExponent = 0;
 
-	private async fail(error: any) {
-		const errorStatus: Readonly<ConnectionStatus> = Object.freeze<
-			ConnectionStatus
-		>({
-			type: "CLOSED",
-			reason: { type: "CONNECTION_ERROR", data: error },
-		});
-
-		this.setSessionStatus(errorStatus);
-
+	private async restart(error: { data: any } | null) {
 		const backoffExponent = this.backoffExponent;
 
 		this.backoffExponent =
@@ -34,12 +31,41 @@ class Session {
 				? maxBackoffExponent
 				: this.backoffExponent + 1;
 
-		return new Promise((resolve) => {
+		const timeoutTime = backoffMSIncrement * 2 ** backoffExponent;
+		const sleepUntil = Date.now() + timeoutTime;
+
+		if (error) {
+			const errorStatus: Readonly<ConnectionStatus> = Object.freeze<
+				ConnectionStatus
+			>({
+				type: "CLOSED",
+				reason: { type: "CONNECTION_ERROR", data: error },
+			});
+
+			this.setSessionStatus(errorStatus);
+		}
+
+		this.setSessionStatus({
+			type: "SLEEPING",
+			sleepUntil: sleepUntil,
+			restartReason: error
+				? {
+						type: "ERROR",
+						data: error.data,
+				  }
+				: {
+						type: "CLOSED",
+				  },
+		});
+
+		await new Promise((resolve) => {
 			setTimeout(() => {
 				this.connect()
-					.catch(this.fail.bind(this))
+					.catch((e) => {
+						this.restart({ data: e });
+					})
 					.then(resolve);
-			}, backoffMSIncrement * 2 ** backoffExponent);
+			}, timeoutTime);
 		});
 	}
 
@@ -48,11 +74,13 @@ class Session {
 		private readonly key: CryptoKeyPair
 	) {
 		this.connect().catch((e) => {
-			this.fail(e).catch(this.fail.bind(this));
+			this.restart(e).catch((e) => {
+				this.restart(e);
+			});
 		});
 	}
 
-	private setSessionStatus(status: ConnectionStatus) {
+	private setSessionStatus(status: SessionStatus) {
 		this._sessionStatus = status;
 		setTimeout(() => {
 			this.sessionStatusChangeEvents.emit(status);
@@ -67,8 +95,8 @@ class Session {
 			}
 			this.setSessionStatus(status);
 			if (status.type === "CLOSED") {
-				this.connect().catch((e) => {
-					this.fail(e).catch(this.fail.bind(this));
+				this.connect().catch(async (e) => {
+					this.restart({ data: e });
 				});
 			}
 		});
@@ -85,7 +113,7 @@ class Session {
 		return this._messageEvents;
 	}
 
-	get sessionStatus(): ConnectionStatus {
+	get sessionStatus(): SessionStatus {
 		return this._sessionStatus;
 	}
 }
