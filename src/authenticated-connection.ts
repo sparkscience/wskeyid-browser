@@ -54,6 +54,7 @@ export default class AuthenticatedConnection {
 	> = new PubSub();
 	private readonly _internalMessageEvents: PubSub<MessageEvent> = new PubSub();
 	private readonly _messageEvents: PubSub<MessageEvent> = new PubSub();
+	private messagesBuffer: string[] = [];
 
 	private fail(error: any) {
 		this.setSessionStatus({
@@ -62,8 +63,7 @@ export default class AuthenticatedConnection {
 		});
 		try {
 			this.ws.close();
-		} finally {
-		}
+		} catch {}
 	}
 
 	private constructor(url: URL, private key: CryptoKeyPair) {
@@ -148,11 +148,20 @@ export default class AuthenticatedConnection {
 			}
 
 			this.setSessionStatus({ type: "CONNECTED" });
+
+			for (const message of this.messagesBuffer) {
+				this.ws.send(message);
+			}
+			this.messagesBuffer = [];
 		}
 	}
 
 	send(message: string) {
-		this.ws.send(message);
+		if (this.sessionStatus.type !== "CONNECTED") {
+			this.messagesBuffer.push(message);
+		} else {
+			this.ws.send(message);
+		}
 	}
 
 	get messageEvents(): Sub<MessageEvent> {

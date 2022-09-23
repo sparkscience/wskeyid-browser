@@ -19,7 +19,10 @@ class Session {
 	private connection: AuthenticatedConnection | null = null;
 	private readonly _messageEvents: PubSub<MessageEvent> = new PubSub();
 	private _sessionStatus: Readonly<SessionStatus> = { type: "PENDING" };
-	private sessionStatusChangeEvents: PubSub<SessionStatus> = new PubSub();
+	private readonly _sessionStatusChangeEvents: PubSub<
+		SessionStatus
+	> = new PubSub();
+	private messagesBuffer: string[] = [];
 
 	private backoffExponent = 0;
 
@@ -74,24 +77,30 @@ class Session {
 		private readonly key: CryptoKeyPair
 	) {
 		this.connect().catch((e) => {
-			this.restart(e).catch((e) => {
-				this.restart(e);
-			});
+			this.restart(e);
 		});
 	}
 
 	private setSessionStatus(status: SessionStatus) {
 		this._sessionStatus = status;
 		setTimeout(() => {
-			this.sessionStatusChangeEvents.emit(status);
+			this._sessionStatusChangeEvents.emit(status);
 		});
 	}
 
 	private async connect() {
 		this.connection = await AuthenticatedConnection.connect(this.url, this.key);
+
 		this.connection.sessionStatusChangeEvents.addEventListener((status) => {
 			if (status.type === "CONNECTED") {
 				this.backoffExponent = 0;
+
+				if (this.connection) {
+					for (const message of this.messagesBuffer) {
+						this.connection.send(message);
+					}
+					this.messagesBuffer = [];
+				}
 			}
 			this.setSessionStatus(status);
 			if (status.type === "CLOSED") {
@@ -105,6 +114,14 @@ class Session {
 		});
 	}
 
+	send(message: string) {
+		if (this.connection) {
+			this.connection.send(message);
+		} else {
+			this.messagesBuffer.push(message);
+		}
+	}
+
 	getNextMessage() {
 		return getNext(this._messageEvents);
 	}
@@ -116,15 +133,16 @@ class Session {
 	get sessionStatus(): SessionStatus {
 		return this._sessionStatus;
 	}
+
+	get sessionStatusChangeEvents(): Sub<SessionStatus> {
+		return this._sessionStatusChangeEvents;
+	}
 }
 
 Promise.resolve()
 	.then(async function() {
 		const keys = await generateKeys();
-		const session = await AuthenticatedConnection.connect(
-			"ws://localhost:8000/path",
-			keys
-		);
+		const session = await new Session("ws://localhost:8000/path", keys);
 
 		session.sessionStatusChangeEvents.addEventListener((status) => {
 			console.log(`Status ${status.type}`);
