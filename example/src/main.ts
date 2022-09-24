@@ -25,8 +25,13 @@ class Session {
 	private messagesBuffer: string[] = [];
 
 	private backoffExponent = 0;
+	private sleeping = false;
 
 	private async restart(error: { data: any } | null) {
+		if (this.sleeping) {
+			return;
+		}
+
 		const backoffExponent = this.backoffExponent;
 
 		this.backoffExponent =
@@ -62,7 +67,10 @@ class Session {
 		});
 
 		await new Promise((resolve) => {
+			console.log("Sleeping for", timeoutTime);
+			this.sleeping = true;
 			setTimeout(() => {
+				this.sleeping = false;
 				this.connect()
 					.catch((e) => {
 						this.restart({ data: e });
@@ -104,9 +112,7 @@ class Session {
 			}
 			this.setSessionStatus(status);
 			if (status.type === "CLOSED") {
-				this.connect().catch(async (e) => {
-					this.restart({ data: e });
-				});
+				this.restart(null);
 			}
 		});
 		this.connection.messageEvents.addEventListener((message) => {
