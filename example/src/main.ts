@@ -67,7 +67,6 @@ class Session {
 		});
 
 		await new Promise((resolve) => {
-			console.log("Sleeping for", timeoutTime);
 			this.sleeping = true;
 			setTimeout(() => {
 				this.sleeping = false;
